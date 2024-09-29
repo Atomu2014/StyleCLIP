@@ -24,30 +24,7 @@ def get_lr(t, initial_lr, rampdown=0.25, rampup=0.05):
     return initial_lr * lr_ramp
 
 
-def main(args):
-    ensure_checkpoint_exists(args.ckpt)
-    text_inputs = torch.cat([clip.tokenize(args.description)]).cuda()
-    os.makedirs(args.results_dir, exist_ok=True)
-
-    g_ema = Generator(args.stylegan_size, 512, 8)
-    g_ema.load_state_dict(torch.load(args.ckpt)["g_ema"], strict=False)
-    g_ema.eval()
-    g_ema = g_ema.cuda()
-    mean_latent = g_ema.mean_latent(4096)
-
-    if args.latent_path:
-        latent_code_init = torch.load(args.latent_path).cuda()
-    elif args.mode == "edit":
-        latent_code_init_not_trunc = torch.randn(1, 512).cuda()
-        with torch.no_grad():
-            _, latent_code_init, _ = g_ema([latent_code_init_not_trunc], return_latents=True,
-                                        truncation=args.truncation, truncation_latent=mean_latent)
-    else:
-        latent_code_init = mean_latent.detach().clone().repeat(1, 18, 1)
-
-    with torch.no_grad():
-        img_orig, _ = g_ema([latent_code_init], input_is_latent=True, randomize_noise=False)
-
+def opt_single_image(args, g_ema, latent_code_init, img_orig, text_inputs):
     if args.work_in_stylespace:
         with torch.no_grad():
             _, _, latent_code_init = g_ema([latent_code_init], input_is_latent=True, return_latents=True)
@@ -114,6 +91,79 @@ def main(args):
 
     return final_result
 
+
+def main(args):
+    ensure_checkpoint_exists(args.ckpt)
+    text_inputs = torch.cat([clip.tokenize(args.description)]).cuda()
+    os.makedirs(args.results_dir, exist_ok=True)
+
+    g_ema = Generator(args.stylegan_size, 512, 8)
+    g_ema.load_state_dict(torch.load(args.ckpt)["g_ema"], strict=False)
+    g_ema.eval()
+    g_ema = g_ema.cuda()
+    mean_latent = g_ema.mean_latent(4096)
+
+    if args.latent_path:
+        latent_code_init = torch.load(args.latent_path).cuda()
+    elif args.mode == "edit":
+        latent_code_init_not_trunc = torch.randn(1, 512).cuda()
+        with torch.no_grad():
+            _, latent_code_init, _ = g_ema([latent_code_init_not_trunc], return_latents=True,
+                                        truncation=args.truncation, truncation_latent=mean_latent)
+    else:
+        latent_code_init = mean_latent.detach().clone().repeat(1, 18, 1)
+
+    with torch.no_grad():
+        img_orig, _ = g_ema([latent_code_init], input_is_latent=True, randomize_noise=False)
+
+    return opt_single_image(args, g_ema, latent_code_init, img_orig, text_inputs)
+
+
+from tqdm import trange
+
+def main_batch(args):
+    ensure_checkpoint_exists(args.ckpt)
+    text_inputs = torch.cat([clip.tokenize(args.description)]).cuda()
+    os.makedirs(args.results_dir, exist_ok=True)
+
+    g_ema = Generator(args.stylegan_size, 512, 8)
+    g_ema.load_state_dict(torch.load(args.ckpt)["g_ema"], strict=False)
+    g_ema.eval()
+    g_ema = g_ema.cuda()
+    mean_latent = g_ema.mean_latent(4096)
+
+    image_list = torch.load('/home/kevin/workspace/ocfm-image/styleclip/encoder4editing/input_images.pt')
+    latent_list = torch.load('/home/kevin/workspace/ocfm-image/styleclip/encoder4editing/latents.pt')
+
+    print(len(image_list), len(latent_list))
+
+    # img_orig, _ = g_ema([latent_list[0]], input_is_latent=True, randomize_noise=False)
+    # torchvision.utils.save_image(img_orig, f"original/0.jpg", normalize=True, range=(-1, 1))
+    # exit(0)
+
+    img_orig_list = []
+
+    for i in trange(len(image_list)):
+            img, latent = image_list[i], latent_list[i]
+            if img is None or latent is None:
+                img_orig_list.append(None)
+                continue
+
+            with torch.no_grad():
+                latent.cuda()
+                img_orig, _ = g_ema([latent], input_is_latent=True, randomize_noise=False)
+
+            img_orig_list.append(img_orig)
+
+            # img_orig, img_gen = opt_single_image(args, g_ema, latent, img_orig, text_inputs)
+
+            torchvision.utils.save_image(img_orig, f"original/{str(i).zfill(5)}.jpg", normalize=True, range=(-1, 1))
+            # torchvision.utils.save_image(img_gen, f"generated/{str(i).zfill(5)}.jpg", normalize=True, range=(-1, 1))
+
+            # exit(0)
+    
+    print(len(img_orig_list))
+    torch.save(img_orig_list, f"original_images.pt")
 
 
 if __name__ == "__main__":

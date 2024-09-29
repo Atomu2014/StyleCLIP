@@ -2,3 +2,4 @@
 /latents/
 /results/
 /mine/
+**/__pycache__/**
