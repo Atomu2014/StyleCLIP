@@ -176,10 +176,10 @@ def main_batch(args):
 
     # img_orig_list = []
 
-    for i in trange(len(image_list)):
+    for i in trange(min(len(image_list), 200)):
         img, latent = image_list[i], latent_list[i]
         if img is None or latent is None:
-            img_orig_list.append(None)
+            # img_orig_list.append(None)
             continue
 
         with torch.no_grad():
